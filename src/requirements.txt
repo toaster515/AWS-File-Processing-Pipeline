@@ -1,0 +1,9 @@
+Flask
+Flask-SQLAlchemy
+Flask-Migrate
+boto3
+gunicorn
+celery
+psycopg2-binary
+azure-storage-blob
+flasgger
