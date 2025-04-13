@@ -57,7 +57,9 @@ SQS → triggers Lambda → processes file → sends POST callback to EC2 URL (F
 ```
 
 **Flow**
+
 ![dag](./dag.png)
+
 ---
 ## Getting Started
 
