@@ -6,7 +6,7 @@ A complete end-to-end file upload and processing API using Python, Flask, AWS La
 
 - Containerized API application
 - S3 file storage
-- Postgres record management
+- Async Postgres record management, via Celery
 - Dynamically process PDFs in Lambda via SQS
 - Wired callback from Lambda to Flask API
 - AWS Secrets Manager
@@ -33,7 +33,7 @@ A complete end-to-end file upload and processing API using Python, Flask, AWS La
 │   ├── variables.tf                # Input variable declarations
 │   └── terraform.tfvars            # Environment-specific values
 └── secrets/
-    └── processing_secrets.json     # Generated during deploy
+    └── processing_secrets.json     # Updated during deploy
 ```
 
 **Deployment Scripts**
@@ -74,8 +74,36 @@ AWS_SECRET_ACCESS_KEY="your-secret"
 AWS_REGION="us-east-1"
 AWS_S3_BUCKET_NAME="your-s3-bucket-name"
 ```
-
 You will also need to acquire your EC2 `Default VPC` as well as your `subnet_id` and add them to the `terraform.tfvars`
+
+#### Secrets
+The `processing_secrets.json` file is auto-generated during deployment, but you’ll need to supply your AWS keys and bucket name for it to work.
+
+You can either:
+
+Export the values as environment variables (recommended):
+
+```bash
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_REGION="us-east-1"
+export AWS_S3_BUCKET_NAME="your-s3-bucket-name"
+```
+
+Or:
+Create a `secrets/processing_secrets.json` manually before first run:
+
+```json
+{
+  "AWS_ACCESS_KEY_ID": "your-access-key",
+  "AWS_SECRET_ACCESS_KEY": "your-secret-key",
+  "AWS_REGION": "us-east-1",
+  "AWS_S3_BUCKET_NAME": "your-bucket-name",
+  "AWS_SQS_QUEUE_URL": "",
+  "API_CALLBACK_URL": ""
+}
+```
+The deploy script will automatically update the `AWS_SQS_QUEUE_URL` and `API_CALLBACK_URL` based on your deployed infrastructure.
 
 ---
 ## Usage
