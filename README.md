@@ -1,98 +1,153 @@
-# File Storage API Template (Flask)
-
-A containerized Flask API template for uploading files to multiple cloud storage providers (AWS S3, Azure Blob), while recording metadata in Postgres. Supports background processing via Celery + Redis and auto-generates Swagger UI docs.
+# AWS File Processing Pipeline
+A complete end-to-end file upload and processing API using Python, Flask, AWS Lambda, SQS, Secrets Manager, and Terraform — designed for local-first deployment and showcase flexibility.
 
 ---
 ## Features
 
-- Clean, modular Flask architecture
-- Upload to AWS S3 or Azure Blob via pluggable storage interface
-- Background task handling with Celery + Redis
-- Postgres for metadata persistence
-- API documentation via Swagger UI (`flasgger`)
-- Auto database migrations on container startup
-- Fully Dockerized for local development
+- Containerized API application
+- S3 file storage
+- Postgres record management
+- Dynamically process PDFs in Lambda via SQS
+- Wired callback from Lambda to Flask API
+- AWS Secrets Manager
+- Terraform infrastructure as code
+- Deployable locally via bash scripts — no CI/CD pipeline required, but can be easily converted
+- Swagger UI available for live documentation at `/apidocs`
 
 ---
-## Quick Start
+## Architecture Overview
 
-### 1. Clone the repo
+**Repo**
+```
+├── scripts/
+│   ├── deploy_terraform.sh         # Full deploy script
+│   ├── destroy_all.sh              # Full destroy script
+│   └── user_data.sh                # EC2 bootstrap (installs Docker & runs Flask app)
+├── src/
+│   └── processing/                 # Lambda function and dependencies
+│       ├── lambda_function.py
+│       ├── pdf_processor.py
+│       └── requirements.txt
+├── terraform/
+│   ├── main.tf                     # Infra definitions
+│   ├── variables.tf                # Input variable declarations
+│   └── terraform.tfvars            # Environment-specific values
+└── secrets/
+    └── processing_secrets.json     # Generated during deploy
+```
+
+**Deployment Scripts**
+```bash
+[dev machine]
+└── deploy_terraform.sh
+    ├── Zip + package lambda
+    ├── terraform init
+    ├── terraform apply → create EC2 + SQS
+    ├── get outputs (EC2 DNS + SQS URL)
+    ├── regenerate secrets file
+    └── terraform apply → upload zip, secrets, deploy Lambda, wire everything
+
+[AWS]
+└── EC2 instance (user_data.sh)
+    └── pulls Docker container + runs Flask app
+        └── loads secrets from AWS
+            └── can push messages to SQS
+
+SQS → triggers Lambda → processes file → sends POST callback to EC2 URL (Flask)
+```
+
+---
+## Getting Started
+
+### Prerequisites
+
+- AWS account with IAM permissions to manage EC2, Lambda, S3, Secrets Manager, IAM, and SQS
+- Terraform >= 1.0
+- Python 3.11
+- Docker (for Flask container)
+
+### Required Environment Variables
 
 ```bash
-git clone https://github.com/your-org/file-storage-api-python.git
-cd file-storage-api-python/docker
+AWS_ACCESS_KEY_ID="your-key"
+AWS_SECRET_ACCESS_KEY="your-secret"
+AWS_REGION="us-east-1"
+AWS_S3_BUCKET_NAME="your-s3-bucket-name"
 ```
-### 2. Start the containers
+
+You will also need to acquire your EC2 `Default VPC` as well as your `subnet_id` and add them to the `terraform.tfvars`
+
+---
+## Usage
+
+### Local
+
+There is `docker-compose` included in the docker directory which will spin up the flask app in a local docker container for testing. This wont have the ability to run the processing lambda, but it can be used for testing the general API functionality with Postgres and file storage. You can view the Swagger for the api as well at `http://localhost:8080/swagger/index.html`
+
+### Deploy
 
 ```bash
-docker-compose up --build
+./scripts/deploy_terraform.sh
 ```
 
-Once it’s up, visit:
-- Swagger UI: http://localhost:8000/apidocs/
-- API Endpoint: `POST /api/files/` — Upload files
+This will:
+- Package Lambda
+- Deploy EC2 and SQS
+- Generate secrets file
+- Upload to AWS Secrets Manager
+- Deploy the rest of the stack
 
----
-## Example Request (via Swagger)
-
-- `POST /api/files/`
-- `Content-Type: multipart/form-data`
-- `form-data` fields:
-    - `file`: file to upload
-    - `provider`: `"S3"` or `"AZURE"`
-
----
-## Config
-
-All environment variables are loaded from `.env`. See `.env.example` for local setup:
-
-```env
-SECRET_KEY=dev-secret DATABASE_URL=postgresql://postgres:postgres@postgres:5432/recordsdb CELERY_BROKER_URL=redis://redis:6379/0 CELERY_RESULT_BACKEND=redis://redis:6379/0  AWS_ACCESS_KEY_ID=your-key AWS_SECRET_ACCESS_KEY=your-secret AWS_S3_BUCKET_NAME=your-bucket  AZURE_STORAGE_CONNECTION_STRING=your-azure-conn AZURE_STORAGE_CONTAINER=your-container
-```
----
-## Architecture
+### Tear Down
 
 ```bash
-src/
-├── app/
-│   ├── __init__.py            # Flask app factory
-│   ├── config.py              # App settings
-│   ├── routes/                # Flask Blueprints
-│   ├── models/                # SQLAlchemy models
-│   ├── services/              # File and storage services
-│   │   └── storage/           # S3 and Azure implementations
-│   ├── tasks/                 # Celery background tasks
-│   └── extensions/            # DB and Celery initialization
-├── run.py                     # Entry point
-├── requirements.txt
-└── Dockerfile
+./scripts/destroy_terraform.sh
 ```
 
-- Follows service-layer architecture with dependency injection via interfaces
-- Easily extendable with new storage providers or background jobs
-
 ---
-## Celery Worker
+## Testing
 
-To start the background task worker:
+1. Hit the Flask API's `/api/files` route with a `multipart/form-data` payload containing:
+    - File
+    - Metadata (JSON string)
+    - Flag: `process=true` with processing params
+        
+2. Confirm S3 stores the file
+3. Check that SQS is triggered
+4. Lambda processes the file (e.g. splits PDF)
+5. Lambda POSTs back to `/api/records/` with new entries
+
+#### Example Curl
 
 ```bash
-docker-compose up worker
+curl -X POST http://<EC2_PUBLIC_IP>:8000/api/files/ \
+  -F "file=@sample.pdf" \
+  -F 'metadata={
+        "file_name": "sample.pdf",
+        "folder_name": "uploads",
+        "description": "Split this doc",
+        "tags": ["example", "test"],
+        "process": true,
+        "process_params": {
+          "split_params": {
+            "file_map": [
+              {"pages": [0, 1]},
+              {"pages": [2]}
+            ]
+          },
+          "prefix": "split",
+          "suffix": "2024"
+        }
+      }'
 ```
-
-This listens for upload metadata tasks and writes to the Postgres DB in the background.
-
----
-## Notes
-
-- Flask app is served via **Gunicorn** in production mode
-- DB migration is handled automatically on container boot using `flask db upgrade`
-- Swagger UI powered by `flasgger` — no extra config needed
+(Note: Wrap `metadata` with single quotes and escape newlines or pass as a compact JSON string.)
 
 ---
-## Roadmap Ideas
 
-- Add JWT auth with Flask-JWT-Extended
-- Input validation with Pydantic or Marshmallow
-- Pre-upload file scanning or processing pipeline
-- Frontend dropzone integration (React, etc.)
+## Potential Enhancements
+
+- Expand Processing Lambda to include information retrieval using OCR and NLP
+- Add GitHub Actions for CI/CD
+- Use ECR image builds instead of Dockerfile-from-git
+- Upload Lambda via container image instead of zip
+    
+
