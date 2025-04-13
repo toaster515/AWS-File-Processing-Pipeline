@@ -56,6 +56,8 @@ A complete end-to-end file upload and processing API using Python, Flask, AWS La
 SQS → triggers Lambda → processes file → sends POST callback to EC2 URL (Flask)
 ```
 
+**Flow**
+![dag](./dag.png)
 ---
 ## Getting Started
 
